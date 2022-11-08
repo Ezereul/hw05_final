@@ -1,3 +1,11 @@
+media/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+sent_emails/
+static/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
