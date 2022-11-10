@@ -31,8 +31,8 @@ class PostCreateFormTest(TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        super().tearDownClass()
         shutil.rmtree(TEMP_MEDIA_ROOT, ignore_errors=True)
+        super().tearDownClass()
 
     def setUp(self):
         self.guest_client = Client()
@@ -182,7 +182,11 @@ class PostCreateFormTest(TestCase):
         self.assertRedirects(
             response, reverse('posts:post_detail', args=[self.post.id]))
         self.assertTrue(
-            Comment.objects.filter(text=form_data['text']).exists())
+            Comment.objects.filter(
+                text=form_data['text'],
+                author=form_data['author'],
+                post=self.post.pk).exists()
+        )
         self.assertEqual(Comment.objects.count(), comments_count + 1)
 
     def test_guest_cant_add_comment(self):

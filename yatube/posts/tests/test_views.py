@@ -1,11 +1,14 @@
 from http import HTTPStatus
+import shutil
+import tempfile
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django import forms
 from django.conf import settings
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 from ..models import Post, Group, Comment, Follow
 
@@ -13,10 +16,25 @@ from ..models import Post, Group, Comment, Follow
 User = get_user_model()
 
 
+TEMP_MEDIA_ROOT = tempfile.mkdtemp(dir=settings.BASE_DIR)
+
+
+@override_settings(MEDIA_ROOT=TEMP_MEDIA_ROOT)
 class PostsPagesTest(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        small_gif = (b'\x47\x49\x46\x38\x39\x61\x02\x00'
+                     b'\x01\x00\x80\x00\x00\x00\x00\x00'
+                     b'\xFF\xFF\xFF\x21\xF9\x04\x00\x00'
+                     b'\x00\x00\x00\x2C\x00\x00\x00\x00'
+                     b'\x02\x00\x01\x00\x00\x02\x02\x0C'
+                     b'\x0A\x00\x3B')
+        uploaded = SimpleUploadedFile(
+            name='small.gif',
+            content=small_gif,
+            content_type='image/gif'
+        )
         cls.author = User.objects.create(username='TestUser')
         cls.following = User.objects.create(username='following')
         cls.not_following = User.objects.create(username='not_following')
@@ -29,7 +47,7 @@ class PostsPagesTest(TestCase):
             text='Текст',
             author=cls.author,
             group=cls.group,
-            image='post/maxresdefault.jpg'
+            image=uploaded
         )
         cls.comment = Comment.objects.create(
             text='Текст комментария',
@@ -45,6 +63,11 @@ class PostsPagesTest(TestCase):
         cls.follow_index = 'posts:follow_index'
         cls.profile_follow = 'posts:profile_follow'
         cls.profile_unfollow = 'posts:profile_unfollow'
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(TEMP_MEDIA_ROOT, ignore_errors=True)
+        super().tearDownClass()
 
     def setUp(self):
         self.authorized_client = Client()
@@ -195,17 +218,20 @@ class PostsPagesTest(TestCase):
             text='Текст поста для кэша',
             author=self.author
         )
-        response_1 = self.authorized_client.get(reverse(self.index))
+        response_before_cache = self.authorized_client.get(
+            reverse(self.index))
         new_post.delete()
-        response_2 = self.authorized_client.get(reverse(self.index))
+        response_cached = self.authorized_client.get(reverse(self.index))
         cache.clear()
-        response_3 = self.authorized_client.get(reverse(self.index))
+        response_empty_cache = self.authorized_client.get(reverse(self.index))
 
-        self.assertEqual(response_1.content, response_2.content)
-        self.assertNotEqual(response_1.content, response_3.content)
+        self.assertEqual(response_before_cache.content,
+                         response_cached.content)
+        self.assertNotEqual(response_before_cache.content,
+                            response_empty_cache.content)
 
     def test_profile_follow_and_unfollow(self):
-        """Пользователь может подписываться и отписываться."""
+        """Пользователь может подписываться."""
         count_follows = Follow.objects.count()
 
         self.authorized_client.get(reverse(
@@ -216,6 +242,12 @@ class PostsPagesTest(TestCase):
         self.assertTrue(Follow.objects.filter(
             user=self.author, author=self.following).exists())
 
+    def test_profile_unfollow(self):
+        """Пользователь может отписываться."""
+        count_follows = Follow.objects.count()
+        Follow.objects.create(user=self.author,
+                              author=self.following)
+
         self.authorized_client.get(reverse(
             self.profile_unfollow,
             args=[self.following.username]))
@@ -225,23 +257,26 @@ class PostsPagesTest(TestCase):
             user=self.author, author=self.following).exists())
 
     def test_post_in_follow_index_of_follower(self):
-        """
-        Пост появляется в ленте тех, кто подписан
-        и не появляется в ленте тех, кто не подписан.
-        """
+        """Пост появляется в ленте тех, кто подписан."""
         post_in_follow = Post.objects.create(
             text='Текст поста из ленты подписок',
             author=self.following
-        )
-        post_not_in_follow = Post.objects.create(
-            text='Текст поста',
-            author=self.not_following
         )
         Follow.objects.create(user=self.author, author=self.following)
 
         response = self.authorized_client.get(reverse(self.follow_index))
 
         self.assertIn(post_in_follow, response.context['page_obj'])
+
+    def test_post_not_in_follow_index_of_not_follower(self):
+        """Пост не появляется в ленте тех, кто не подписан."""
+        post_not_in_follow = Post.objects.create(
+            text='Текст поста',
+            author=self.not_following
+        )
+
+        response = self.authorized_client.get(reverse(self.follow_index))
+
         self.assertNotIn(post_not_in_follow, response.context['page_obj'])
 
 

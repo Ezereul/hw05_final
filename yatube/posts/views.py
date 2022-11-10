@@ -39,16 +39,17 @@ def profile(request, username):
     post_list = author.posts.all()
     count_posts = post_list.count()
     page_obj = create_page_obj(post_list, POSTS_PER_PAGE, request)
-    following = False
-    if request.user.is_authenticated:
-        if Follow.objects.filter(user=request.user, author=author):
-            following = True
     context = {
         'author': author,
         'page_obj': page_obj,
         'count_posts': count_posts,
-        'following': following
     }
+    if request.user.is_authenticated:
+        if Follow.objects.filter(user=request.user, author=author).exists():
+            following = True
+        else:
+            following = False
+        context['following'] = following
     return render(request, 'posts/profile.html', context)
 
 
@@ -86,16 +87,15 @@ def post_edit(request, post_id):
     current_user = request.user
     if current_user != post.author:
         return redirect('posts:post_detail', post_id=post_id)
+    form = PostForm(
+        request.POST or None,
+        files=request.FILES or None,
+        instance=post
+    )
     if request.method == 'POST':
-        form = PostForm(
-            request.POST or None,
-            files=request.FILES or None,
-            instance=post
-        )
         if form.is_valid():
             form.save()
             return redirect('posts:post_detail', post_id=post_id)
-    form = PostForm(instance=post)
     context = {
         'form': form,
         'is_edit': True,
@@ -107,20 +107,18 @@ def post_edit(request, post_id):
 def add_comment(request, post_id):
     post = get_object_or_404(Post, pk=post_id)
     form = CommentForm(request.POST or None)
-    if form.is_valid():
-        comment = form.save(commit=False)
-        comment.author = request.user
-        comment.post = post
-        comment.save()
+    if request.method == 'POST':
+        if form.is_valid():
+            comment = form.save(commit=False)
+            comment.author = request.user
+            comment.post = post
+            comment.save()
     return redirect('posts:post_detail', post_id=post_id)
 
 
 @login_required()
 def follow_index(request):
-    follows = Follow.objects.select_related('author').filter(user=request.user)
-    post_list = Follow.objects.none()
-    for follow in follows:
-        post_list |= follow.author.posts.all()
+    post_list = Post.objects.filter(author__following__user=request.user)
     page_obj = create_page_obj(post_list, POSTS_PER_PAGE, request)
     context = {
         'page_obj': page_obj,
@@ -130,13 +128,12 @@ def follow_index(request):
 
 @login_required()
 def profile_follow(request, username):
-    if request.user.username == username:
-        return redirect('posts:profile', username=username)
     get_author = get_object_or_404(User, username=username)
-    Follow.objects.get_or_create(
-        user=request.user,
-        author=get_author
-    )
+    if request.user != get_author:
+        Follow.objects.get_or_create(
+            user=request.user,
+            author=get_author
+        )
     return redirect('posts:profile', username=username)
 
 
