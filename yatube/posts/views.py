@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.cache import cache_page
 
-from .models import Post, Group, Follow
+from posts.models import Post, Group, Follow
 from .forms import PostForm, CommentForm
 from .utils import create_page_obj
 
